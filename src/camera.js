@@ -96,7 +96,7 @@ class CameraController {
             this.freeRoamPosition = this.camera.position.clone();
             this.freeRoamLookAt = this.targetLookAt.clone();
         }
-        console.log('Free roam mode:', this.isFreeRoam ? 'enabled' : 'disabled');
+
     }
 
     /**
@@ -225,7 +225,12 @@ class CameraController {
                 break;
 
             case CAMERA_STATE.RESET:
-                this.currentState = CAMERA_STATE.AIMING;
+                // Reset camera to aiming position before transitioning
+                this.handleAimingCamera(ballPosition, aimAngle);
+                // Only transition to AIMING after camera has moved to position
+                if (this.camera.position.distanceTo(this.targetPosition) < 0.1) {
+                    this.currentState = CAMERA_STATE.AIMING;
+                }
                 break;
         }
 
@@ -265,12 +270,22 @@ class CameraController {
             ballPosition.z - dirZ * cameraDistance
         );
         
-        // Look in the direction of aim
-        this.targetLookAt.set(
-            ballPosition.x + dirX * 50,
-            ballPosition.y - 1,
-            ballPosition.z + dirZ * 50
-        );
+        // Look towards the pin (hole) instead of the aim direction
+        if (window.physicsEngine && window.physicsEngine.hole) {
+            const holePosition = window.physicsEngine.hole.position;
+            this.targetLookAt.set(
+                holePosition.x,
+                holePosition.y + 0.5, // Look slightly above the hole
+                holePosition.z
+            );
+        } else {
+            // Fallback to looking in aim direction if hole position not available
+            this.targetLookAt.set(
+                ballPosition.x + dirX * 50,
+                ballPosition.y - 1,
+                ballPosition.z + dirZ * 50
+            );
+        }
     }
 
     handleLandingCamera(ballPosition) {

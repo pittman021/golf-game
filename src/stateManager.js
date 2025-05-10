@@ -23,7 +23,6 @@ export function saveGameState(state) {
             lastSaved: Date.now()
         };
         localStorage.setItem('golfGameState', JSON.stringify(stateToSave));
-        console.log('Game state saved successfully');
     } catch (error) {
         console.error('Error saving game state:', error);
     }
@@ -38,7 +37,6 @@ export function loadGameState() {
         const savedState = localStorage.getItem('golfGameState');
         if (savedState) {
             const state = JSON.parse(savedState);
-            console.log('Game state loaded successfully');
             return state;
         }
     } catch (error) {

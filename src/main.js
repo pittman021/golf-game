@@ -34,25 +34,10 @@ const keys = {
 import { saveGameState, loadGameState, saveHoleScore, clearGameState, getDefaultState } from './stateManager.js';
 import { VisualEffects } from './visualEffects.js';
 
-// Expose key objects to global scope for debugging
-function exposeDebugObjects() {
-    window.gameObjects = {
-        scene,
-        camera,
-        renderer,
-        terrain,
-        ball,
-        cameraController,
-        physicsEngine
-    };
-    console.log("Debug objects exposed to window.gameObjects");
-}
-
 // Load modules asynchronously
 async function loadModules() {
-    try {
-        console.log("Loading modules...");
-        
+    try {        
+    
         // Import modules
         const [terrainModule, physicsModule, cameraModule, modelsModule, uiModule, holeConfigsModule] = await Promise.all([
             import('./terrain.js'),
@@ -63,24 +48,34 @@ async function loadModules() {
             import('./holeConfigs.js')
         ]);
         
-        console.log("All modules loaded successfully");
+        console.log("Modules loaded:", {
+            terrain: terrainModule,
+            physics: physicsModule,
+            camera: cameraModule,
+            models: modelsModule,
+            ui: uiModule,
+            holeConfigs: holeConfigsModule
+        });
         
         // Initialize the game after modules are loaded
-        init(terrainModule.Terrain, physicsModule.PhysicsEngine, 
-             cameraModule.CameraController, modelsModule.ModelManager, 
-             uiModule.UIManager, holeConfigsModule.holeConfigs);
+        init(terrainModule, physicsModule, cameraModule, modelsModule, uiModule, holeConfigsModule);
     } catch (error) {
         console.error("Error loading modules:", error);
+        console.error("Error details:", {
+            name: error.name,
+            message: error.message,
+            stack: error.stack
+        });
     }
 }
 
 // Initialize the game
-function init(Terrain, PhysicsEngine, CameraController, ModelManager, UIManager, holeConfigs) {
-    // Store Terrain class reference
-    TerrainClass = Terrain;
+function init(terrainModule, physicsModule, cameraModule, modelsModule, uiModule, holeConfigsModule) {
+    // Store Terrain class reference (named export)
+    TerrainClass = terrainModule.Terrain;
     
     // Store holeConfigs globally and expose to window
-    window.holeConfigs = holeConfigs;
+    window.holeConfigs = holeConfigsModule.holeConfigs;
     
     // Load saved state if exists
     const savedState = loadGameState();
@@ -89,8 +84,8 @@ function init(Terrain, PhysicsEngine, CameraController, ModelManager, UIManager,
         currentStrokes = savedState.totalStrokes;
     }
     
-    // Setup physics engine first
-    physicsEngine = new PhysicsEngine();
+    // Setup physics engine first (named export)
+    physicsEngine = new physicsModule.PhysicsEngine();
     window.physicsEngine = physicsEngine;
     
     // Setup scene
@@ -127,11 +122,11 @@ function init(Terrain, PhysicsEngine, CameraController, ModelManager, UIManager,
     // Setup skybox
     setupSkybox(scene);
     
-    // Setup models first
-    modelManager = new ModelManager(scene);
+    // Setup models first (named export)
+    modelManager = new modelsModule.ModelManager(scene);
     
     // Create and add the terrain using the new Terrain class with first hole config
-    terrain = new Terrain(scene, modelManager, holeConfigs[1]);
+    terrain = new TerrainClass(scene, modelManager, holeConfigsModule[`hole${currentHole}Config`]);
     // Make terrain global for debugging
     window.debugTerrain = terrain;
     
@@ -148,8 +143,8 @@ function init(Terrain, PhysicsEngine, CameraController, ModelManager, UIManager,
     trajectoryLine = new THREE.Line(trajectoryGeometry, trajectoryMaterial);
     scene.add(trajectoryLine);
 
-    // Setup camera
-    cameraController = new CameraController(scene);
+    // Setup camera (named export)
+    cameraController = new cameraModule.CameraController(scene);
     camera = cameraController.camera;
     // Make camera global for debugging
     window.debugCamera = camera;
@@ -190,8 +185,8 @@ function init(Terrain, PhysicsEngine, CameraController, ModelManager, UIManager,
     // Create ball
     ball = modelManager.createBall();
     
-    // Setup UI
-    uiManager = new UIManager();
+    // Setup UI (named export)
+    uiManager = new uiModule.UIManager();
     uiManager.updateHoleInfo(currentHole, currentPar, currentStrokes);
     
     // Connect physics engine to UI
@@ -210,9 +205,6 @@ function init(Terrain, PhysicsEngine, CameraController, ModelManager, UIManager,
     
     // Start game loop
     animate();
-    
-    // Expose objects for debugging
-    exposeDebugObjects();
 }
 
 // Start loading modules when the page loads
@@ -255,12 +247,10 @@ function setupSkybox(scene) {
 
 // Second part of initialization
 function completeInitialization() {
-    console.log("Completing initialization...");
-    
+
     // Connect physics engine to the terrain
     physicsEngine.setTerrain(terrain);
-    console.log("Physics engine connected to terrain");
-    
+
     // Initialize camera position and look target
     const initialPosition = new THREE.Vector3(0, 100, 300);
     const initialLookAt = new THREE.Vector3(0, 0, 0);
@@ -280,9 +270,6 @@ function completeInitialization() {
     
     // Start game loop
     animate();
-    
-    // Expose objects for debugging
-    exposeDebugObjects();
 }
 
 // Add new function to load a hole
@@ -291,6 +278,10 @@ function loadHole(holeNumber) {
     if (holeTransitionTimeout) {
         clearTimeout(holeTransitionTimeout);
         holeTransitionTimeout = null;
+    }
+
+    if (visualEffects) {
+        visualEffects.resetTrail();
     }
 
     // Get the hole configuration
@@ -409,6 +400,8 @@ window.loadHole = loadHole;
 // Game loop
 let frameCount = 0;
 function animate() {
+
+    const start = performance.now();
     // Request next frame immediately
     requestAnimationFrame(animate);
     
@@ -449,7 +442,6 @@ function animate() {
             
             // If ball just stopped, update the indicator
             if (lastBallMoving && !ballIsMoving) {
-                console.log('Ball stopped moving, updating ideal power indicator');
                 uiManager.updateIdealPowerIndicator();
             }
             
@@ -550,6 +542,11 @@ function animate() {
     } catch (e) {
         console.error('Error in animation loop:', e);
     }
+
+    const duration = performance.now() - start;
+if (duration > 16) {
+  console.warn(`Frame took ${duration.toFixed(2)}ms`);
+}
 }
 
 // Event handlers
@@ -557,6 +554,9 @@ function onWindowResize() {
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight);
+    if (visualEffects && visualEffects.trailMaterial) {
+        visualEffects.trailMaterial.resolution.set(window.innerWidth, window.innerHeight);
+    }
 }
 
 function onKeyDown(event) {
@@ -680,6 +680,10 @@ function updateAccuracyBar() {
 function takeShot() {
     // Don't allow shots if the game is paused
     if (gamePaused) return;
+
+    if (visualEffects) {
+        visualEffects.resetTrail(); // Reset trail before a new shot
+    }
     
     // Reset aiming state and hide trajectory line
     isAiming = false;
@@ -687,7 +691,6 @@ function takeShot() {
         trajectoryLine.visible = false;
     }
 
-    
     const club = uiManager.getSelectedClub() || 'dr'; // Default to driver if no club selected
 
     // Calculate base shot velocity based on power (0-1 from power meter)
@@ -754,6 +757,8 @@ function takeShot() {
     audio.volume = 0.5;
     audio.play().catch(e => console.log("Sound play error:", e));
     */
+
+    isShooting = false; // Ensure isShooting is false after the shot is taken
 }
 
 function handleHoleCompletion() {
@@ -973,7 +978,7 @@ function updateAiming() {
         physicsEngine.ball.velocity.length() < 0.1) {
         
         if (!isAiming) {
-            console.log("Ball stopped, entering aiming mode");
+            
             isAiming = true;
             // Immediately make trajectory visible and update it
             if (trajectoryLine) {
@@ -1005,8 +1010,7 @@ function resetBall() {
     physicsEngine.ball.velocity.set(0, 0, 0);
     physicsEngine.ball.inAir = false;
     physicsEngine.ball.onGround = true;
-    
-    console.log("Ball reset to:", ball.position);
+
     
     // Start aiming after ball is reset
     isAiming = true;
@@ -1026,7 +1030,6 @@ function checkBallInHole() {
         
         if (dist < 0.5 && Math.abs(ballPos.y - terrain.getHeightAt(hole.x, hole.z)) < 0.5) {
             isHoleComplete = true;
-            console.log(`Hole ${currentHole} completed in ${currentStrokes} strokes`);
             
             // Wait 2 seconds before loading next hole
             holeTransitionTimeout = setTimeout(() => {
@@ -1045,6 +1048,10 @@ function checkBallInHole() {
 function restartCurrentHole() {
     // Save current hole score before restarting
     saveHoleScore(currentHole, currentStrokes);
+
+    if (visualEffects) {
+        visualEffects.resetTrail();
+    }
     
     // Reset hole-specific state
     currentStrokes = 0;
@@ -1063,6 +1070,10 @@ function restartCurrentHole() {
 function restartGame() {
     // Clear saved game state
     clearGameState();
+
+    if (visualEffects) {
+        visualEffects.resetTrail();
+    }
     
     // Reset all game state
     currentHole = 1;

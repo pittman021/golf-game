@@ -6,7 +6,6 @@ class UIManager {
         // Get UI container
         this.uiContainer = document.getElementById('ui-container');
         if (!this.uiContainer) {
-            console.warn('UI container not found, creating one');
             this.uiContainer = document.createElement('div');
             this.uiContainer.id = 'ui-container';
             document.body.appendChild(this.uiContainer);
@@ -187,8 +186,9 @@ class UIManager {
         this.powerMeter.style.bottom = '20px';
         this.powerMeter.style.border = '3px solid #000'; // Thicker black border
         this.powerMeter.style.borderRadius = '5px';
-        this.powerMeter.style.overflow = 'visible'; // Changed to visible to show indicator outside
+        this.powerMeter.style.overflow = 'hidden'; // Changed to hidden to prevent layout recalculations
         this.powerMeter.style.zIndex = '1000'; // Ensure it's visible above everything
+        this.powerMeter.style.willChange = 'transform'; // Add will-change for GPU acceleration
         
         // Create a completely different style of indicator - visible arrow on the right side
         this.idealPowerIndicator = document.createElement('div');
@@ -320,52 +320,44 @@ class UIManager {
     // Set physics engine reference
     setPhysicsEngine(physicsEngine) {
         this.physicsEngine = physicsEngine;
-        console.log("Physics engine set in UI Manager:", !!this.physicsEngine);
-        console.log("Club distances cached:", this.physicsEngine ? !!this.physicsEngine.clubDistancesCache : false);
     }
-
     updatePowerMeter(power) {
-        console.log("Updating power meter with power:", power);
-        
-        const bar = this.powerMeter.querySelector('.power-bar') || document.createElement('div');
-        bar.className = 'power-bar';
-        bar.style.width = '100%';
-        bar.style.height = `${power * 100}%`;
-        bar.style.backgroundColor = `hsl(${power * 120}, 100%, 50%)`;
-        bar.style.position = 'absolute';
-        bar.style.left = '0';
-        bar.style.bottom = '0';
-        bar.style.transition = 'height 0.1s ease-out';
-        
-        if (!this.powerMeter.contains(bar)) {
-            console.log("Adding power bar to power meter");
+        let bar = this.powerMeter.querySelector('.power-bar');
+        if (!bar) {
+            bar = document.createElement('div');
+            bar.className = 'power-bar power-bar-fill';
+            bar.style.width = '100%';
+            bar.style.height = '100%'; // fixed height; we scale instead
+            bar.style.backgroundColor = 'lime';
+            bar.style.position = 'absolute';
+            bar.style.left = '0';
+            bar.style.bottom = '0';
+            bar.style.transformOrigin = 'bottom'; // key for vertical scale
+            bar.style.transform = 'scaleY(0)';
+            bar.style.transition = 'transform 0.1s ease-out';
+            bar.style.willChange = 'transform'; // Add will-change for GPU acceleration
             this.powerMeter.appendChild(bar);
         }
-        
-        // Debug power bar state
-        console.log("Power bar updated:", {
-            height: bar.style.height,
-            backgroundColor: bar.style.backgroundColor,
-            inDOM: this.powerMeter.contains(bar)
-        });
-        
-        // Don't update the power indicator here, it should only update when club changes or ball stops
+    
+        // Set color based on power (same as before)
+        bar.style.backgroundColor = `hsl(${power * 120}, 100%, 50%)`;
+    
+        // Use transform instead of height, with hardware acceleration
+        bar.style.transform = `translate3d(0, 0, 0) scaleY(${power})`;
     }
+    
     
     updateIdealPowerIndicator() {
         // Only update if we have a physics engine reference
         if (!this.physicsEngine) {
-            console.log("Physics engine not available for power indicator");
+      
             return;
         }
         
         if (!this.idealPowerIndicator) {
-            console.log("Ideal power indicator element not found");
+        
             return;
         }
-        
-        // Log when the indicator is updated and why
-        console.log(`Updating ideal power indicator for ${this.selectedClub}`);
         
         const club = this.selectedClub;
         try {
@@ -380,18 +372,17 @@ class UIManager {
             }
             idealPower = Math.min(1, Math.max(0, idealPower)); // Re-clamp just in case
             
+            // Check if we're on the green
             const isOnGreen = this.physicsEngine.terrain && 
-                            this.physicsEngine.terrain.getSurfaceTypeAt(
-                                this.physicsEngine.ball.position.x, 
-                                this.physicsEngine.ball.position.z
-                            ) === 'green';
+                this.physicsEngine.terrain.getSurfaceTypeAt(
+                    this.physicsEngine.ball.position.x, 
+                    this.physicsEngine.ball.position.z
+                ) === 'green';
             const isPutter = club === 'putter';
             
             // The idealPower is now the correctly scaled 0-1 value for the UI.
             // No further normalization against an old maxPower is needed.
             const normalizedPowerForUI = idealPower; 
-            
-            console.log(`Ideal power (0-1 from physics): ${idealPower.toFixed(3)}, Using for UI: ${(normalizedPowerForUI * 100).toFixed(0)}%`);
             
             // Check if we're using full power (meaning the hole is potentially out of range)
             const isMaxPower = normalizedPowerForUI >= 0.99;
@@ -440,12 +431,22 @@ class UIManager {
     }
     
     showAccuracyBar() {
-        // Add entrance animation
+        // Return early if already visible
+        if (this.accuracyBar.style.display === 'block') {
+            return;
+        }
+
+        // Set display to block
         this.accuracyBar.style.display = 'block';
-        this.accuracyBar.style.animation = 'scaleIn 0.3s ease-out';
         
-        // Reset slider position
-        this.accuracySlider.style.left = '0';
+        // Remove animation class if it exists
+        this.accuracyBar.classList.remove('accuracy-bar-enter');
+        
+        // Force reflow
+        void this.accuracyBar.offsetWidth;
+        
+        // Add animation class
+        this.accuracyBar.classList.add('accuracy-bar-enter');
     }
     
     hideAccuracyBar() {
@@ -668,8 +669,19 @@ class UIManager {
 const style = document.createElement('style');
 style.textContent = `
 @keyframes scaleIn {
-    0% { transform: translateX(-50%) scale(0.5); opacity: 0; }
-    100% { transform: translateX(-50%) scale(1); opacity: 1; }
+    0% { transform: translate3d(-50%, 0, 0) scale3d(0.5, 1, 1); opacity: 0; }
+    100% { transform: translate3d(-50%, 0, 0) scale3d(1, 1, 1); opacity: 1; }
+}
+
+#accuracy-bar {
+    will-change: transform, opacity;
+    transform: translate3d(-50%, 0, 0);
+    backface-visibility: hidden;
+    perspective: 1000px;
+}
+
+.accuracy-bar-enter {
+    animation: scaleIn 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 `;
 document.head.appendChild(style);

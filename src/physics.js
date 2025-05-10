@@ -123,9 +123,8 @@ class PhysicsEngine {
             return this.clubDistancesCache;
         }
         
-        console.log("Calculating club distances by simulating shots...");
-        const distances = {};
         const clubs = Object.keys(this.clubStats);
+        const distances = {}; // Initialize distances object
 
         const timeStep = 0.05; // Simulation time step
         const maxSimulationTime = 15; // Max seconds to simulate a shot to prevent infinite loops
@@ -186,7 +185,6 @@ class PhysicsEngine {
                 }
             }
             distances[club] = Math.max(0, simulatedDistance); // Ensure non-negative distance
-            console.log(`${club}: simulated max distance = ${distances[club].toFixed(2)} units (multiplier: ${stats.multiplier}, angle: ${stats.angle}°)`);
         }
         
         this.clubDistancesCache = distances;
@@ -203,14 +201,6 @@ class PhysicsEngine {
         
         // Calculate and cache distances
         const distances = this.calculateClubDistances();
-        
-        // Log results for debugging
-        console.log("Club distances calculated:", distances);
-        console.log("Relative distances:", {
-            "driver/iron": (distances.driver / distances.iron).toFixed(1),
-            "iron/wedge": (distances.iron / distances.wedge).toFixed(1),
-            "wedge/putter": (distances.wedge / distances.putter).toFixed(1)
-        });
     }
 
     // Get terrain height at a specific position

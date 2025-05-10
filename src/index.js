@@ -6,18 +6,18 @@ window.THREE = THREE;
 
 // Wait for DOM to be fully loaded before initializing the game
 document.addEventListener('DOMContentLoaded', async () => {
-  console.log('DOM loaded, initializing Three.js');
+
   
   try {
     // Import main game file
     const mainModule = await import('./main.js');
-    console.log('main.js loaded successfully');
+  
     
     // Call loadModules function directly instead of waiting for the 'load' event
     // This will kick off the game initialization immediately
     if (typeof mainModule.loadModules === 'function') {
       await mainModule.loadModules();
-      console.log('Game initialization started via loadModules()');
+   
     } else {
       console.warn('loadModules function not found in main.js - the game should initialize via its own event handlers');
     }
