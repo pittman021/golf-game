@@ -1,37 +1,12 @@
-/**
- * Golf Course Hole Configurations
- * 
- * This module defines the configuration for each golf hole in the game.
- * Each hole configuration includes:
- * - Dimensions (width, depth, resolution)
- * - Hole number and par
- * - Tee position and elevation
- * - Green position, radius, and elevation
- * - Fairway path and width
- * - Bunker positions and sizes
- * - Tree positions and distribution
- * 
- * The configurations are used by the Terrain class to generate the 3D course layout
- * and by the game logic to set up hole-specific gameplay elements.
- */
-
 import * as THREE from 'three';
+import { nudgeConflictingBunkers } from './terrainUtils';
 
-// Base configuration for all holes
-const baseConfig = {    
-    width: 600,    // Course width in units
-    depth: 300,    // Course depth in units
-    resolution: 165 // Terrain mesh resolution (increased from 128 to 256)
+const baseConfig = {
+    width: 600,
+    depth: 300,
+    resolution: 165
 };
 
-/**
- * Hole 1 Configuration - Par 3 Straight Hole
- * A straightforward par 3 hole with:
- * - Straight fairway from tee to green
- * - Two bunkers protecting the green
- * - Elevated tee position
- * - Flat green area
- */
 export const hole1Config = {
     ...baseConfig,
     holeNumber: 1,
@@ -60,16 +35,8 @@ export const hole1Config = {
         ]
     }
 };
+nudgeConflictingBunkers(hole1Config);
 
-/**
- * Hole 2 Configuration - Par 5 Dogleg Right
- * A challenging par 5 hole featuring:
- * - Dogleg right fairway design
- * - Multiple bunkers including a large one at the dogleg
- * - Elevated tee position
- * - Strategically placed trees
- * - Complex approach to the green
- */
 export const hole2Config = {
     ...baseConfig,
     holeNumber: 2,
@@ -85,9 +52,9 @@ export const hole2Config = {
         ]
     },
     bunkers: [
-        { x: 160, z: 60, radius: 20 }, // Dogleg bunker (unchanged)
-        { x: 230, z: 140, radius: 10 }, // Moved slightly away from green top-right
-        { x: 270, z: 100, radius: 10 }  // Moved to green's bottom-left edge
+        { x: 160, z: 60, radius: 20 },
+        { x: 230, z: 140, radius: 10 },
+        { x: 270, z: 100, radius: 10 }
     ],
     trees: {
         count: 40,
@@ -104,8 +71,8 @@ export const hole2Config = {
         ]
     }
 };
+nudgeConflictingBunkers(hole2Config);
 
-// Hole 3
 export const hole3Config = {
     ...baseConfig,
     holeNumber: 3,
@@ -132,8 +99,8 @@ export const hole3Config = {
         ]
     }
 };
+nudgeConflictingBunkers(hole3Config);
 
-// Hole 4
 export const hole4Config = {
     ...baseConfig,
     holeNumber: 4,
@@ -162,8 +129,8 @@ export const hole4Config = {
         ]
     }
 };
+nudgeConflictingBunkers(hole4Config);
 
-// Hole 5
 export const hole5Config = {
     ...baseConfig,
     holeNumber: 5,
@@ -191,8 +158,8 @@ export const hole5Config = {
         ]
     }
 };
+nudgeConflictingBunkers(hole5Config);
 
-// Hole 6
 export const hole6Config = {
     ...baseConfig,
     holeNumber: 6,
@@ -221,8 +188,8 @@ export const hole6Config = {
         ]
     }
 };
+nudgeConflictingBunkers(hole6Config);
 
-// Hole 7
 export const hole7Config = {
     ...baseConfig,
     holeNumber: 7,
@@ -248,8 +215,8 @@ export const hole7Config = {
         ]
     }
 };
+nudgeConflictingBunkers(hole7Config);
 
-// Hole 8
 export const hole8Config = {
     ...baseConfig,
     holeNumber: 8,
@@ -278,8 +245,8 @@ export const hole8Config = {
         ]
     }
 };
+nudgeConflictingBunkers(hole8Config);
 
-// Hole 9
 export const hole9Config = {
     ...baseConfig,
     holeNumber: 9,
@@ -306,9 +273,8 @@ export const hole9Config = {
         ]
     }
 };
+nudgeConflictingBunkers(hole9Config);
 
-
-// Export all hole configurations
 export const holeConfigs = {
     1: hole1Config,
     2: hole2Config,
@@ -319,4 +285,4 @@ export const holeConfigs = {
     7: hole7Config,
     8: hole8Config,
     9: hole9Config
-}; 
+};

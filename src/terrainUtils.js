@@ -1,3 +1,31 @@
+/**
+ * Removes bunkers that are too close to the green to avoid visual and terrain overlap.
+ * @param {Object} holeConfig - The full hole configuration
+ * @param {number} [buffer=2] - Extra padding between bunker and green edge
+ */
+export function nudgeConflictingBunkers(holeConfig, buffer = 2) {
+    const { green, bunkers } = holeConfig;
+
+    holeConfig.bunkers = bunkers.map(bunker => {
+        const dx = bunker.x - green.x;
+        const dz = bunker.z - green.z;
+        const dist = Math.sqrt(dx * dx + dz * dz);
+        const minDist = bunker.radius + green.radius + buffer;
+
+        if (dist < minDist) {
+            const scale = minDist / dist;
+            return {
+                ...bunker,
+                x: green.x + dx * scale,
+                z: green.z + dz * scale
+            };
+        }
+
+        return bunker;
+    });
+}
+
+
 function applyTeeElevation(geometry, teeX) {
     const vertices = geometry.attributes.position.array;
     for (let i = 0; i < vertices.length; i += 3) {
@@ -282,3 +310,4 @@ window.applyFairwaySlopeToGreen = applyFairwaySlopeToGreen;
 window.applyTerrainColors = applyTerrainColors;
 window.createTerrainHeightVisualizer = createTerrainHeightVisualizer;
 window.verifyTerrainToWorldMapping = verifyTerrainToWorldMapping; 
+window.nudgeConflictingBunkers = nudgeConflictingBunkers
