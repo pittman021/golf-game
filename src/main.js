@@ -1,6 +1,6 @@
 // Game state
 let scene, camera, renderer;
-let physicsEngine, modelManager, cameraController, uiManager;
+let physicsEngine, modelManager, cameraController, uiManager, visualEffects;
 let ball, terrain, flagPin;
 let isShooting = false;
 let power = 0;
@@ -22,6 +22,18 @@ let isHoleComplete = false;
 let holeTransitionTimeout = null;
 let TerrainClass; // Store the Terrain class reference
 
+// Keyboard state tracking
+const keys = {
+    ArrowUp: false,
+    ArrowDown: false,
+    ArrowLeft: false,
+    ArrowRight: false
+};
+
+// Import state management functions
+import { saveGameState, loadGameState, saveHoleScore, clearGameState, getDefaultState } from './stateManager.js';
+import { VisualEffects } from './visualEffects.js';
+
 // Expose key objects to global scope for debugging
 function exposeDebugObjects() {
     window.gameObjects = {
@@ -42,12 +54,16 @@ async function loadModules() {
         console.log("Loading modules...");
         
         // Import modules
-        const terrainModule = await import('./terrain.js');
-        const physicsModule = await import('./physics.js');
-        const cameraModule = await import('./camera.js');
-        const modelsModule = await import('./models.js');
-        const uiModule = await import('./ui.js');
-        const holeConfigsModule = await import('./holeConfigs.js');
+        const [terrainModule, physicsModule, cameraModule, modelsModule, uiModule, holeConfigsModule] = await Promise.all([
+            import('./terrain.js'),
+            import('./physics.js'),
+            import('./camera.js'),
+            import('./models.js'),
+            import('./ui.js'),
+            import('./holeConfigs.js')
+        ]);
+        
+        console.log("All modules loaded successfully");
         
         // Initialize the game after modules are loaded
         init(terrainModule.Terrain, physicsModule.PhysicsEngine, 
@@ -63,8 +79,15 @@ function init(Terrain, PhysicsEngine, CameraController, ModelManager, UIManager,
     // Store Terrain class reference
     TerrainClass = Terrain;
     
-    // Store holeConfigs globally
+    // Store holeConfigs globally and expose to window
     window.holeConfigs = holeConfigs;
+    
+    // Load saved state if exists
+    const savedState = loadGameState();
+    if (savedState) {
+        currentHole = savedState.currentHole;
+        currentStrokes = savedState.totalStrokes;
+    }
     
     // Setup physics engine first
     physicsEngine = new PhysicsEngine();
@@ -75,7 +98,6 @@ function init(Terrain, PhysicsEngine, CameraController, ModelManager, UIManager,
     // Make scene global for debugging
     window.debugScene = scene;
 
-    
     // Setup lighting
     const ambientLight = new THREE.AmbientLight(0x8894b0, 0.3);
     scene.add(ambientLight);
@@ -102,7 +124,7 @@ function init(Terrain, PhysicsEngine, CameraController, ModelManager, UIManager,
     fillLight.castShadow = false;
     scene.add(fillLight);
     
-    // Setup skybox (keeping existing skybox code if available)
+    // Setup skybox
     setupSkybox(scene);
     
     // Setup models first
@@ -132,10 +154,15 @@ function init(Terrain, PhysicsEngine, CameraController, ModelManager, UIManager,
     // Make camera global for debugging
     window.debugCamera = camera;
     
-    // Initialize the camera controller if it has an initialize method
+    // Initialize the camera controller
     if (typeof cameraController.initialize === 'function') {
-    
         cameraController.initialize();
+    }
+    
+    // Ensure camera controller is fully initialized before proceeding
+    if (!cameraController || !cameraController.targetPosition || !cameraController.targetLookAt) {
+        console.error("Camera controller not properly initialized");
+        return;
     }
     
     // Setup renderer
@@ -143,12 +170,10 @@ function init(Terrain, PhysicsEngine, CameraController, ModelManager, UIManager,
     // Make renderer global for debugging
     window.debugRenderer = renderer;
 
-    
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap; // Soft shadows
   
-    
     // Add renderer to the container created in index.js
     const container = document.getElementById('app-container') || document.body;
     container.appendChild(renderer.domElement);
@@ -162,7 +187,6 @@ function init(Terrain, PhysicsEngine, CameraController, ModelManager, UIManager,
     renderer.domElement.style.left = '0';
     renderer.domElement.style.zIndex = '0'; // Behind UI elements
 
-    
     // Create ball
     ball = modelManager.createBall();
     
@@ -177,6 +201,9 @@ function init(Terrain, PhysicsEngine, CameraController, ModelManager, UIManager,
     window.addEventListener('resize', onWindowResize);
     document.addEventListener('keydown', onKeyDown);
     document.addEventListener('keyup', onKeyUp);
+    
+    // Initialize visual effects
+    visualEffects = new VisualEffects(scene);
     
     // Complete initialization
     completeInitialization();
@@ -200,8 +227,8 @@ function setupSkybox(scene) {
     const skyGeometry = new THREE.BoxGeometry(1000, 1000, 1000);
     const skyMaterial = new THREE.ShaderMaterial({
         uniforms: {
-            topColor: { value: new THREE.Color(0x0055cc) },
-            bottomColor: { value: new THREE.Color(0xffeedd) }
+            topColor: { value: new THREE.Color(0x4682b4) },     // Steel Blue
+            bottomColor: { value: new THREE.Color(0xadd8e6) }   // Light Blue
         },
         vertexShader: `
             varying vec3 vWorldPosition;
@@ -233,6 +260,15 @@ function completeInitialization() {
     // Connect physics engine to the terrain
     physicsEngine.setTerrain(terrain);
     console.log("Physics engine connected to terrain");
+    
+    // Initialize camera position and look target
+    const initialPosition = new THREE.Vector3(0, 100, 300);
+    const initialLookAt = new THREE.Vector3(0, 0, 0);
+    
+    camera.position.copy(initialPosition);
+    cameraController.targetPosition.copy(initialPosition);
+    camera.lookAt(initialLookAt);
+    cameraController.targetLookAt.copy(initialLookAt);
     
     // Load the first hole
     loadHole(1);
@@ -269,6 +305,10 @@ function loadHole(holeNumber) {
     currentPar = holeConfig.par;
     currentStrokes = 0;
     isHoleComplete = false;
+    isShooting = false;
+    isAccuracyPhase = false;
+    power = 0;
+    powerIncreasing = true;
 
     // Remove existing terrain and objects
     if (terrain) {
@@ -305,10 +345,10 @@ function loadHole(holeNumber) {
 
     // Calculate initial camera position behind the ball
     const cameraOffset = new THREE.Vector3(-8, 8, 0).applyAxisAngle(new THREE.Vector3(0, 1, 0), aimAngle);
+
+    // Set camera position and look target
     camera.position.copy(tee).add(cameraOffset);
     cameraController.targetPosition.copy(camera.position);
-
-    // Set camera look target toward the hole
     camera.lookAt(hole.x, hole.y + 0.5, hole.z);
     cameraController.targetLookAt.set(hole.x, hole.y + 0.5, hole.z);
 
@@ -324,13 +364,19 @@ function loadHole(holeNumber) {
         terrain.getHeightAt.bind(terrain)
     );
 
-    // Update physics engine
+    // Update physics engine with new terrain and reset ball state
     physicsEngine.setTerrain(terrain);
     physicsEngine.setHolePosition(hole);
-    physicsEngine.ball.position.copy(ball.position);
+    
+    // Completely reset physics ball state
+    physicsEngine.ball.position.copy(tee);
     physicsEngine.ball.velocity.set(0, 0, 0);
     physicsEngine.ball.inAir = false;
     physicsEngine.ball.onGround = true;
+    
+    // Ensure visual ball matches physics ball
+    ball.position.copy(physicsEngine.ball.position);
+    ball.rotation.copy(physicsEngine.ball.rotation);
 
     // Initialize or update trajectory line
     if (!trajectoryLine) {
@@ -347,10 +393,14 @@ function loadHole(holeNumber) {
 
     // Update UI
     uiManager.updateHoleInfo(currentHole, currentPar, currentStrokes);
+    uiManager.updatePowerMeter(0); // Reset power meter
 
     // Start aiming
     isAiming = true;
     updateTrajectory();
+    
+    // Ensure game is not paused
+    gamePaused = false;
 }
 
 // Expose loadHole to window for UI access
@@ -375,10 +425,16 @@ function animate() {
             return;
         }
         
-        // Update physics
-        if (physicsEngine) {
-            physicsEngine.update(1/60);
-            checkBallInHole();
+        // Only update physics if ball is moving with a slightly higher threshold
+        if (physicsEngine && physicsEngine.ball) {
+            const isBallMoving = physicsEngine.ball.velocity.lengthSq() > 0.02; // Increased threshold
+            if (isBallMoving) {
+                physicsEngine.update(1/60);
+                checkBallInHole();
+            } else if (physicsEngine.ball.velocity.lengthSq() > 0) {
+                // If ball is barely moving, set velocity to zero to prevent micro-movements
+                physicsEngine.ball.velocity.set(0, 0, 0);
+            }
         }
         
         // Auto-aim when ball stops
@@ -459,6 +515,11 @@ function animate() {
             updateAccuracyBar();
         }
         
+        // Update visual effects
+        if (physicsEngine && physicsEngine.ball) {
+            visualEffects.update(physicsEngine.ball.position, physicsEngine.ball.velocity);
+        }
+        
         // Render scene - make sure this is being called!
         if (scene && camera && renderer) {
             // Clear the renderer with the sky blue color
@@ -474,6 +535,18 @@ function animate() {
             }
             frameCount++;
         }
+        
+        // Save state every 30 seconds
+        if (frameCount % 1800 === 0) { // 30 seconds at 60fps
+            const currentState = loadGameState() || { ...defaultState };
+            const state = {
+                ...currentState,
+                currentHole,
+                totalStrokes: currentStrokes,
+                lastSaved: Date.now()
+            };
+            saveGameState(state);
+        }
     } catch (e) {
         console.error('Error in animation loop:', e);
     }
@@ -487,7 +560,22 @@ function onWindowResize() {
 }
 
 function onKeyDown(event) {
-    if (event.key === ' ') {
+    // Update keyboard state
+    if (event.key in keys) {
+        keys[event.key] = true;
+    }
+
+    if (event.key === 'c' || event.key === 'C') {
+        // Only allow free roam before taking a shot
+        if (!isShooting && !isAccuracyPhase) {
+            cameraController.keys = keys; // Pass keyboard state to camera controller
+            cameraController.toggleFreeRoam();
+            // Hide trajectory when entering free roam
+            if (trajectoryLine) {
+                trajectoryLine.visible = false;
+            }
+        }
+    } else if (event.key === ' ') {
         if (!isShooting && !isAccuracyPhase) {
             // Start power phase
             isShooting = true;
@@ -504,21 +592,39 @@ function onKeyDown(event) {
             uiManager.hideAccuracyBar();
             takeShot();
         }
-    } else if (event.key === 'ArrowLeft') {
-        aimAngle += 0.1; // Rotate aim counterclockwise
+    } else if (event.key === 'ArrowLeft' && !cameraController.isFreeRoam) {
+        aimAngle += 0.05; // Rotate aim counterclockwise
         isAiming = true; // Start aiming when adjusting angle
         aimAngleChanged = true; // Flag that aim angle changed
-    } else if (event.key === 'ArrowRight') {
-        aimAngle -= 0.1; // Rotate aim clockwise
+    } else if (event.key === 'ArrowRight' && !cameraController.isFreeRoam) {
+        aimAngle -= 0.05; // Rotate aim clockwise
         isAiming = true; // Start aiming when adjusting angle
         aimAngleChanged = true; // Flag that aim angle changed
     } else if (event.key === 'Shift') {
         // Optional: add explicit aiming mode with shift key
         isAiming = true;
+    } else if (event.key === 'r' || event.key === 'R') {
+        if (event.shiftKey) {
+            // Shift + R to restart entire game
+            if (confirm('Are you sure you want to restart the entire game?')) {
+                restartGame();
+            }
+        }
+    }
+
+    // Add scorecard shortcut
+    if (event.key.toLowerCase() === 's') {
+        uiManager.toggleScorecard();
     }
 }
 
 function onKeyUp(event) {
+    // Update keyboard state
+    if (event.key in keys) {
+        keys[event.key] = false;
+    }
+
+    // Handle spacebar for power meter
     if (event.key === ' ' && isShooting) {
         // End power phase, start accuracy phase
         isShooting = false;
@@ -580,12 +686,18 @@ function takeShot() {
     if (trajectoryLine) {
         trajectoryLine.visible = false;
     }
+
     
-    const club = uiManager.getSelectedClub() || 'driver'; // Default to driver if no club selected
-    const velocity = power * 20; // Base velocity scaling adjusted for realistic ball movement
+    const club = uiManager.getSelectedClub() || 'dr'; // Default to driver if no club selected
+
+    // Calculate base shot velocity based on power (0-1 from power meter)
+    const minBaseShotVelocity = 1.0; // Drastically reduced for better power meter proportionality
+    const maxBaseShotVelocity = 60.0; // Max speed before club multipliers/accuracy
+    // power is a global variable ranging from 0 to 1, set by updatePowerMeter
+    const calculatedBaseVelocity = minBaseShotVelocity + power * (maxBaseShotVelocity - minBaseShotVelocity);
     
     // Get accuracy result
-    const accuracyResult = uiManager.getAccuracyResult(accuracy);
+    const accuracyResult = uiManager.getAccuracyResult(accuracy); // accuracy is global, 0-1
     
     // Apply accuracy effects to the shot
     let accuracyMultiplier = 1.0;
@@ -605,9 +717,9 @@ function takeShot() {
         randomAngleOffset = (Math.random() - 0.5) * 0.5; // +/- 0.25 radians
     }
     
-    // Apply modifications
-    const adjustedVelocity = velocity * accuracyMultiplier;
-    const adjustedAimAngle = aimAngle + randomAngleOffset;
+    // Apply accuracy modifications to determine the final initial velocity for the physics engine
+    const finalInitialVelocity = calculatedBaseVelocity * accuracyMultiplier;
+    const adjustedAimAngle = aimAngle + randomAngleOffset; // aimAngle is global
     
     currentStrokes++; // Increment stroke count
     uiManager.updateHoleInfo(currentHole, currentPar, currentStrokes);
@@ -629,8 +741,8 @@ function takeShot() {
     // Make sure visual ball matches physics ball
     ball.position.copy(physicsEngine.ball.position);
     
-    // Now calculate the shot
-    const shotSuccess = physicsEngine.calculateShot(adjustedVelocity, adjustedAimAngle, club);
+    // Now calculate the shot using the final initial velocity
+    const shotSuccess = physicsEngine.calculateShot(finalInitialVelocity, adjustedAimAngle, club);
     
     // Reset power meter after shot
     power = 0;
@@ -645,27 +757,46 @@ function takeShot() {
 }
 
 function handleHoleCompletion() {
-    
     gamePaused = true;
+    
+    // Save hole score and get updated state
+    saveHoleScore(currentHole, currentStrokes);
+    const state = loadGameState(); // Get the latest state after saving
     
     // Remove ball from scene
     scene.remove(ball);
     
-    // Show completion message
+    // Show completion message with score relative to par
+    const scoreRelativeToPar = currentStrokes - currentPar;
+    const scoreText = scoreRelativeToPar > 0 ? `+${scoreRelativeToPar}` : 
+                     scoreRelativeToPar < 0 ? scoreRelativeToPar : 'E';
+    
     setTimeout(() => {
-        alert(`Hole ${currentHole} completed in ${currentStrokes} strokes!`);
+        alert(`Hole ${currentHole} completed in ${currentStrokes} strokes (${scoreText})`);
         
-        // Reset for next hole
-        currentHole++;
-        currentStrokes = 0;
-        // Reset aim angle to point toward the hole
-        aimAngle = 0;
-        // Optionally update par for new hole here
-        uiManager.updateHoleInfo(currentHole, currentPar, currentStrokes);
-        gamePaused = false;
-        
-        // Create a new ball and set it at the new tee position
-        resetBall();
+        // Check if there are more holes
+        if (currentHole < Object.keys(holeConfigs).length) {
+            // Move to next hole
+            currentHole++;
+            currentStrokes = 0;
+            // Reset aim angle to point toward the hole
+            aimAngle = 0;
+            // Update UI for new hole
+            uiManager.updateHoleInfo(currentHole, currentPar, currentStrokes);
+            gamePaused = false;
+            
+            // Load the next hole
+            loadHole(currentHole);
+        } else {
+            // Game complete - show final score
+            const totalStrokes = state.totalStrokes;
+            const totalPar = Object.values(holeConfigs).reduce((sum, config) => sum + config.par, 0);
+            const finalScoreRelativeToPar = totalStrokes - totalPar;
+            const finalScoreText = finalScoreRelativeToPar > 0 ? `+${finalScoreRelativeToPar}` : 
+                                 finalScoreRelativeToPar < 0 ? finalScoreRelativeToPar : 'E';
+            
+            uiManager.showGameComplete(totalStrokes, finalScoreText);
+        }
     }, 1000);
     
     // Make sure aiming is reset at hole completion
@@ -675,96 +806,98 @@ function handleHoleCompletion() {
     }
 }
 
-function predictTrajectory(power, aimAngle, club) {
-    if (power <= 0.05) power = 0.05; // Ensure minimum power for prediction
-    
+function predictTrajectory(inputPower, aimAngle, club) {
+    // Ensure minimum power for prediction, but allow 0 for realistic low power shots if desired by design
+    // For now, let's keep a small minimum to avoid issues if inputPower is exactly 0 and minBase is 0.
+    const powerForPrediction = Math.max(0.01, inputPower); 
+
     const points = [];
     const timeStep = 0.1;
-    // Make totalTime adaptive based on power and club multiplier
+    
     const clubConfig = physicsEngine.clubStats[club] || physicsEngine.clubStats.driver;
-    const adaptiveTotalTime = Math.max(4.0, power * clubConfig.multiplier * 1.5);
-    const steps = Math.ceil(adaptiveTotalTime / timeStep);
-    
-    // Get club-specific stats
+
+    // --- Consistent Initial Velocity Calculation (Matches takeShot) ---
+    const minBaseShotVelocity = 1.0; // Must match takeShot
+    const maxBaseShotVelocity = 60.0; // Must match takeShot
+    const calculatedBaseVelocity = minBaseShotVelocity + powerForPrediction * (maxBaseShotVelocity - minBaseShotVelocity);
+    // For trajectory prediction, we assume perfect accuracy, so accuracyMultiplier is 1.0
+    const finalInitialVelocityForPhysics = calculatedBaseVelocity; // This is what physics.calculateShot expects
+
+    // Now, let physicsEngine.calculateShot give us the initial THREE.Vector3 velocity
+    // To do this without actually *taking* a shot or altering the main physicsEngine.ball state,
+    // we need a temporary ball object or to replicate the core of calculateShot here.
+    // For simplicity and consistency, let's replicate the core velocity calculation part of calculateShot:
     const radAngle = THREE.MathUtils.degToRad(clubConfig.angle);
+    const totalVelocityMagnitude = finalInitialVelocityForPhysics * clubConfig.multiplier;
+
+    const horizontalVelocity = totalVelocityMagnitude * Math.cos(radAngle);
+    const verticalVelocity = totalVelocityMagnitude * Math.sin(radAngle);
     
-    // Calculate initial velocity components
-    const initialVelocity = power * 25;
-    const totalVelocity = initialVelocity * clubConfig.multiplier;
-    
-    // Calculate velocity components
-    const horizontalVelocity = totalVelocity * Math.cos(radAngle);
-    const verticalVelocity = totalVelocity * Math.sin(radAngle);
-    
-    // Apply aim direction to horizontal components
     const velocity = new THREE.Vector3(
         horizontalVelocity * Math.cos(aimAngle),
         verticalVelocity,
         horizontalVelocity * -Math.sin(aimAngle)
     );
-    
-    // Start from current ball position
-    const position = ball.position.clone();
+    // --- End of Consistent Initial Velocity Calculation ---
+
+    const adaptiveTotalTime = Math.max(4.0, powerForPrediction * clubConfig.multiplier * 1.5); // This can be tuned
+    const steps = Math.ceil(adaptiveTotalTime / timeStep);
+
+    const position = ball.position.clone(); // Start from current actual ball position
     points.push(position.clone());
     
     let inAir = true;
-    let onGround = false;
-    let groundContactPoint = null;
-    
-    // Simplified trajectory simulation
+    let groundContactPoint = null; // Keep this for now
+    const DRAG_COEFFICIENT = 0.0002; // Must match physics.js
+
     for (let i = 0; i < steps; i++) {
         if (inAir) {
-            // Apply gravity
+            // Apply gravity (Consistent with physics.js)
             velocity.y -= physicsEngine.gravity * timeStep;
+
+            // Apply Air Drag (Consistent with physics.js)
+            const magnitude = velocity.length();
+            if (magnitude > 0.001) { // Avoid issues if velocity is zero
+                let dragEffect = 1.0 - (DRAG_COEFFICIENT * magnitude);
+                if (dragEffect < 0.1) dragEffect = 0.1;
+                // No need for 'else if (dragEffect > 1.0)' as COEFFICIENT is positive
+                velocity.multiplyScalar(dragEffect);
+            }
             
             // Move ball
             const nextPos = position.clone();
             nextPos.add(velocity.clone().multiplyScalar(timeStep));
             
-            // Get simplified terrain height
             let terrainHeight = 0;
             try {
                 terrainHeight = physicsEngine.getTerrainHeightAt(nextPos.x, nextPos.z);
             } catch (e) {
-                console.warn("Error getting terrain height in trajectory prediction");
+                console.warn("Error getting terrain height in trajectory prediction", e);
             }
             
-            // Check for collision
             if (nextPos.y <= terrainHeight) {
                 nextPos.y = terrainHeight;
-                velocity.y *= -0.3;
+                velocity.y *= -0.3; // Simplified bounce for prediction
                 
-                // Store first ground contact point
                 if (!groundContactPoint) {
                     groundContactPoint = nextPos.clone();
                 }
                 
-                if (Math.abs(velocity.y) < 1) {
+                if (Math.abs(velocity.y) < 1) { // If bounce is small, consider it stopped in air phase
                     inAir = false;
-                    onGround = true;
+                    // No onGround = true here, as the loop might continue with ground logic if we add it
                 }
             }
-            
             position.copy(nextPos);
-        } else if (onGround) {
-            // Simple ground movement with friction
-            const friction = 0.15;
-            velocity.multiplyScalar(1 - friction);
-            
-            if (velocity.length() < 0.2) break;
-            
-            // Move ball
-            position.add(velocity.clone().multiplyScalar(timeStep));
-            
-            // Update height to follow terrain
-            try {
-                position.y = physicsEngine.getTerrainHeightAt(position.x, position.z);
-            } catch (e) {
-                // Keep current height if there's an error
-            }
+        } else {
+            // Current predictTrajectory doesn't have sophisticated ground roll prediction.
+            // For now, if it's not inAir, we stop adding points or break.
+            // This part can be expanded later if accurate ground roll prediction is needed.
+            break; 
         }
         
         points.push(position.clone());
+        if (points.length > 500) break; // Safety break for very long trajectories
     }
     
     // If simulation ended with ball still in the air, add a final point on the ground
@@ -789,6 +922,11 @@ function updateTrajectory() {
         // Safety check - ensure all components are available
         if (!trajectoryLine || !ball || !physicsEngine || !uiManager) {
             console.warn('Cannot update trajectory line: required components not initialized');
+            return;
+        }
+
+        // Only update trajectory if we're in aiming mode and the line is visible
+        if (!isAiming || !trajectoryLine.visible) {
             return;
         }
         
@@ -902,3 +1040,45 @@ function checkBallInHole() {
         }
     }
 }
+
+// Add restart functions
+function restartCurrentHole() {
+    // Save current hole score before restarting
+    saveHoleScore(currentHole, currentStrokes);
+    
+    // Reset hole-specific state
+    currentStrokes = 0;
+    isHoleComplete = false;
+    isAiming = false;
+    isShooting = false;
+    isAccuracyPhase = false;
+    
+    // Reload current hole
+    loadHole(currentHole);
+    
+    // Update UI
+    uiManager.updateHoleInfo(currentHole, currentPar, currentStrokes);
+}
+
+function restartGame() {
+    // Clear saved game state
+    clearGameState();
+    
+    // Reset all game state
+    currentHole = 1;
+    currentStrokes = 0;
+    isHoleComplete = false;
+    isAiming = false;
+    isShooting = false;
+    isAccuracyPhase = false;
+    
+    // Reload first hole
+    loadHole(1);
+    
+    // Update UI
+    uiManager.updateHoleInfo(currentHole, currentPar, currentStrokes);
+}
+
+// Expose restart functions to window for UI access
+window.restartCurrentHole = restartCurrentHole;
+window.restartGame = restartGame;

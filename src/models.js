@@ -101,23 +101,36 @@ class ModelManager {
         
         // Animation function for the flag
         flag.userData.animate = function(windDirection, windSpeed) {
+            // Skip animation if wind is very light
+            if (windSpeed < 0.1) return;
+            
+            // Only update every 3 frames for better performance
+            if (Math.floor(Date.now() / 16) % 3 !== 0) return;
+            
             const time = Date.now() * 0.001;
             const positionAttribute = this.geometry.getAttribute('position');
+            const vertices = this.userData.originalVertices;
             
-            // Apply wind effect to vertices
+            // Pre-calculate wind factors
+            const windFactor = 0.01 * windSpeed;
+            const timeFactor = time * 2; // Reduced from multiple time factors to one
+            
+            // Apply wind effect to vertices in batches
             for (let i = 0; i < positionAttribute.count; i++) {
-                const vertex = this.userData.originalVertices[i];
+                const vertex = vertices[i];
                 
                 // Only animate vertices that are part of the flag (not the edges attached to the pole)
                 if (vertex.x > 0.01) {
-                    // Create wind effect based on position in the flag
-                    const waveX = Math.sin(time * 2 + vertex.y * 3) * 0.01 * windSpeed * (vertex.x / 0.8);
-                    const waveZ = Math.cos(time * 3 + vertex.x * 2) * 0.01 * windSpeed * (vertex.x / 0.8);
+                    // Simplified wave calculation
+                    const xFactor = vertex.x / 0.8;
+                    const wave = Math.sin(timeFactor + vertex.y * 2) * windFactor * xFactor;
                     
                     // Update position with wind influence
-                    positionAttribute.setX(i, vertex.x + waveX);
-                    positionAttribute.setY(i, vertex.y);
-                    positionAttribute.setZ(i, vertex.z + waveZ);
+                    positionAttribute.setXYZ(i, 
+                        vertex.x + wave,
+                        vertex.y,
+                        vertex.z + wave * 0.5 // Reduced z-axis movement
+                    );
                 }
             }
             
