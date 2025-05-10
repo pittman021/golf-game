@@ -1,6 +1,6 @@
 // Game state
 let scene, camera, renderer;
-let physicsEngine, modelManager, cameraController, uiManager, visualEffects;
+let physicsEngine, modelManager, cameraController, uiManager, visualEffects, audioManager;
 let ball, terrain, flagPin;
 let isShooting = false;
 let power = 0;
@@ -33,6 +33,7 @@ const keys = {
 // Import state management functions
 import { saveGameState, loadGameState, saveHoleScore, clearGameState, getDefaultState } from './stateManager.js';
 import { VisualEffects } from './visualEffects.js';
+import { AudioManager } from './audioManager.js';
 
 // Load modules asynchronously
 async function loadModules() {
@@ -76,6 +77,25 @@ function init(terrainModule, physicsModule, cameraModule, modelsModule, uiModule
     
     // Store holeConfigs globally and expose to window
     window.holeConfigs = holeConfigsModule.holeConfigs;
+    
+    // Initialize audio manager
+    audioManager = new AudioManager();
+    
+    // Add event listeners for audio initialization
+    document.addEventListener('click', () => {
+        if (audioManager) {
+            console.log('User interaction detected, resuming audio...');
+            audioManager.resumeAudio();
+        }
+    });
+    
+    // Also try to resume audio on key press
+    document.addEventListener('keydown', () => {
+        if (audioManager) {
+            console.log('Key press detected, resuming audio...');
+            audioManager.resumeAudio();
+        }
+    });
     
     // Load saved state if exists
     const savedState = loadGameState();
@@ -348,6 +368,12 @@ function loadHole(holeNumber) {
     ball.position.copy(tee);
     scene.add(ball);
 
+    // Initialize ball userData for shot tracking
+    if (!ball.userData) {
+        ball.userData = {};
+    }
+    ball.userData.lastShotStart = ball.position.clone();
+
     // Create flag pin at hole position
     flagPin = modelManager.createFlagPin(
         hole.x,
@@ -364,6 +390,12 @@ function loadHole(holeNumber) {
     physicsEngine.ball.velocity.set(0, 0, 0);
     physicsEngine.ball.inAir = false;
     physicsEngine.ball.onGround = true;
+    
+    // Initialize physics ball userData
+    if (!physicsEngine.ball.userData) {
+        physicsEngine.ball.userData = {};
+    }
+    physicsEngine.ball.userData.lastShotStart = physicsEngine.ball.position.clone();
     
     // Ensure visual ball matches physics ball
     ball.position.copy(physicsEngine.ball.position);
@@ -385,6 +417,7 @@ function loadHole(holeNumber) {
     // Update UI
     uiManager.updateHoleInfo(currentHole, currentPar, currentStrokes);
     uiManager.updatePowerMeter(0); // Reset power meter
+    uiManager.forceUpdateIdealPower(); // Update ideal power indicator for new hole
 
     // Start aiming
     isAiming = true;
@@ -400,9 +433,7 @@ window.loadHole = loadHole;
 // Game loop
 let frameCount = 0;
 function animate() {
-
     const start = performance.now();
-    // Request next frame immediately
     requestAnimationFrame(animate);
     
     try {
@@ -420,12 +451,11 @@ function animate() {
         
         // Only update physics if ball is moving with a slightly higher threshold
         if (physicsEngine && physicsEngine.ball) {
-            const isBallMoving = physicsEngine.ball.velocity.lengthSq() > 0.02; // Increased threshold
+            const isBallMoving = physicsEngine.ball.velocity.lengthSq() > 0.02;
             if (isBallMoving) {
                 physicsEngine.update(1/60);
                 checkBallInHole();
             } else if (physicsEngine.ball.velocity.lengthSq() > 0) {
-                // If ball is barely moving, set velocity to zero to prevent micro-movements
                 physicsEngine.ball.velocity.set(0, 0, 0);
             }
         }
@@ -437,12 +467,26 @@ function animate() {
         if (ball && physicsEngine && physicsEngine.ball) {
             ball.position.copy(physicsEngine.ball.position);
             
-            // Check if ball has stopped moving to update ideal power indicator
+            // Check if ball has stopped moving
             const ballIsMoving = physicsEngine.ball.velocity.lengthSq() > 0.01;
             
-            // If ball just stopped, update the indicator
+            // If ball just stopped, show shot feedback
             if (lastBallMoving && !ballIsMoving) {
-                uiManager.updateIdealPowerIndicator();
+                // Calculate shot distance
+                const startPos = physicsEngine.ball.userData.lastShotStart || physicsEngine.ball.position;
+                const endPos = physicsEngine.ball.position;
+                const dx = endPos.x - startPos.x;
+                const dz = endPos.z - startPos.z;
+                const shotDistance = Math.sqrt(dx * dx + dz * dz);
+                
+                // Get accuracy result from the last shot
+                const accuracy = uiManager.getAccuracyResult(uiManager.lastAccuracy);
+                
+                // Show shot feedback
+                uiManager.showShotFeedback(accuracy, shotDistance);
+                
+                // Store current position as start for next shot
+                physicsEngine.ball.userData.lastShotStart = physicsEngine.ball.position.clone();
             }
             
             // Store state for next frame
@@ -453,9 +497,6 @@ function animate() {
                 // Update distance to hole
                 if (physicsEngine.hole) {
                     uiManager.updateDistance(ball.position, physicsEngine.hole.position);
-                    
-                    // Remove the continuous update of the ideal power indicator
-                    // uiManager.updateIdealPowerIndicator(); - This was causing excessive calculations
                 }
                 
                 // Update wind UI
@@ -471,18 +512,14 @@ function animate() {
             
             // Update trajectory preview
             if (isAiming && trajectoryLine) {
-                // Only update trajectory when club or aim angle changes
-                // not power changes since we use fixed power now
                 if (uiManager.clubChanged || aimAngleChanged) {
                     updateTrajectory();
                     // Reset change flags
                     uiManager.clubChanged = false;
                     aimAngleChanged = false;
                 }
-                // Always ensure trajectory is visible when aiming
                 trajectoryLine.visible = true;
             } else if (trajectoryLine) {
-                // Hide trajectory when not aiming
                 trajectoryLine.visible = false;
             }
         }
@@ -512,24 +549,16 @@ function animate() {
             visualEffects.update(physicsEngine.ball.position, physicsEngine.ball.velocity);
         }
         
-        // Render scene - make sure this is being called!
+        // Render scene
         if (scene && camera && renderer) {
-            // Clear the renderer with the sky blue color
             renderer.setClearColor(0x87CEEB, 1);
             renderer.clear();
-            
-            // Render the scene
             renderer.render(scene, camera);
-            
-            // Debug info every 60 frames
-            if (frameCount % 60 === 0) {
-              
-            }
             frameCount++;
         }
         
         // Save state every 30 seconds
-        if (frameCount % 1800 === 0) { // 30 seconds at 60fps
+        if (frameCount % 1800 === 0) {
             const currentState = loadGameState() || { ...defaultState };
             const state = {
                 ...currentState,
@@ -544,9 +573,9 @@ function animate() {
     }
 
     const duration = performance.now() - start;
-if (duration > 16) {
-  console.warn(`Frame took ${duration.toFixed(2)}ms`);
-}
+    if (duration > 16) {
+        console.warn(`Frame took ${duration.toFixed(2)}ms`);
+    }
 }
 
 // Event handlers
@@ -640,23 +669,23 @@ function onKeyUp(event) {
 
 function updatePowerMeter() {
     if (powerIncreasing) {
-        power += 0.015; // Increase power
+        power += 0.015;
         if (power >= 1.0) {
             power = 1.0;
             powerIncreasing = false;
         }
     } else {
-        power -= 0.015; // Decrease power
+        power -= 0.015;
         if (power <= 0) {
             power = 0;
             powerIncreasing = true;
         }
     }
     
-    // No need to track power changes for trajectory since we use fixed power now
-    
-    // Update UI power meter
-    uiManager.updatePowerMeter(power);
+    // Update UI power meter - only update the power bar, not the ideal indicator
+    if (uiManager) {
+        uiManager.updatePowerMeter(power);
+    }
 }
 
 function updateAccuracyBar() {
@@ -702,6 +731,9 @@ function takeShot() {
     // Get accuracy result
     const accuracyResult = uiManager.getAccuracyResult(accuracy); // accuracy is global, 0-1
     
+    // Store accuracy for shot feedback
+    uiManager.lastAccuracy = accuracy;
+    
     // Apply accuracy effects to the shot
     let accuracyMultiplier = 1.0;
     let randomAngleOffset = 0;
@@ -727,7 +759,6 @@ function takeShot() {
     currentStrokes++; // Increment stroke count
     uiManager.updateHoleInfo(currentHole, currentPar, currentStrokes);
     
-    
     // Always force the ball into a clean state before taking a shot
     physicsEngine.ball.onGround = true;
     physicsEngine.ball.inAir = false;
@@ -751,12 +782,20 @@ function takeShot() {
     power = 0;
     uiManager.updatePowerMeter(power);
     
-    // Play sound effect - commented out as we don't have the audio files yet
-    /*
-    const audio = new Audio('sounds/golf_hit.mp3');
-    audio.volume = 0.5;
-    audio.play().catch(e => console.log("Sound play error:", e));
-    */
+    // Play appropriate sound effect based on club type
+    if (audioManager) {
+        // Map club types to sound types
+        let soundType;
+        if (club === 'putter') {
+            soundType = 'putter';
+        } else if (club === 'driver' || club === '5wood') {
+            soundType = 'driver';
+        } else {
+            soundType = 'iron';
+        }
+        console.log('Playing sound for shot:', { club, soundType });
+        audioManager.playSound(soundType);
+    }
 
     isShooting = false; // Ensure isShooting is false after the shot is taken
 }
@@ -978,11 +1017,14 @@ function updateAiming() {
         physicsEngine.ball.velocity.length() < 0.1) {
         
         if (!isAiming) {
-            
             isAiming = true;
             // Immediately make trajectory visible and update it
             if (trajectoryLine) {
                 trajectoryLine.visible = true;
+            }
+            // Update ideal power indicator when starting to aim
+            if (uiManager) {
+                uiManager.forceUpdateIdealPower();
             }
             // Only update trajectory when aiming state changes
             updateTrajectory();

@@ -11,6 +11,26 @@ class UIManager {
             document.body.appendChild(this.uiContainer);
         }
 
+        // Create shot feedback panel
+        this.shotFeedbackPanel = document.createElement('div');
+        this.shotFeedbackPanel.id = 'shot-feedback-panel';
+        this.shotFeedbackPanel.style.position = 'fixed';
+        this.shotFeedbackPanel.style.top = '20px';
+        this.shotFeedbackPanel.style.right = '20px';
+        this.shotFeedbackPanel.style.transform = 'none'; // Remove center transform
+        this.shotFeedbackPanel.style.background = 'rgba(0,0,0,0.8)';
+        this.shotFeedbackPanel.style.padding = '20px';
+        this.shotFeedbackPanel.style.borderRadius = '10px';
+        this.shotFeedbackPanel.style.color = 'white';
+        this.shotFeedbackPanel.style.fontFamily = 'Arial, sans-serif';
+        this.shotFeedbackPanel.style.fontWeight = 'bold';
+        this.shotFeedbackPanel.style.textAlign = 'center';
+        this.shotFeedbackPanel.style.zIndex = '1000';
+        this.shotFeedbackPanel.style.opacity = '0';
+        this.shotFeedbackPanel.style.transition = 'opacity 0.3s ease-in-out';
+        this.shotFeedbackPanel.style.pointerEvents = 'none';
+        this.uiContainer.appendChild(this.shotFeedbackPanel);
+
         // Create main info panel
         this.panel = document.createElement('div');
         this.panel.id = 'game-info-panel';
@@ -115,6 +135,9 @@ class UIManager {
         // Add flag to track club changes
         this.clubChanged = false;
 
+        // Add flag to track if ideal power indicator needs update
+        this.idealPowerNeedsUpdate = true;
+
         // Add hole selector button
         this.holeSelector = document.createElement('div');
         this.holeSelector.id = 'hole-selector';
@@ -178,37 +201,52 @@ class UIManager {
             this.clubSelector.appendChild(button);
         });
 
+        // Setup power meter with more visible styling
         this.powerMeter.style.width = '30px';
         this.powerMeter.style.height = '200px';
-        this.powerMeter.style.backgroundColor = '#aaaaaa'; // Slightly darker gray
+        this.powerMeter.style.backgroundColor = '#333333'; // Darker background for better contrast
         this.powerMeter.style.position = 'fixed';
         this.powerMeter.style.left = '50px';
         this.powerMeter.style.bottom = '20px';
-        this.powerMeter.style.border = '3px solid #000'; // Thicker black border
+        this.powerMeter.style.border = '3px solid #666'; // More visible border
         this.powerMeter.style.borderRadius = '5px';
-        this.powerMeter.style.overflow = 'hidden'; // Changed to hidden to prevent layout recalculations
-        this.powerMeter.style.zIndex = '1000'; // Ensure it's visible above everything
-        this.powerMeter.style.willChange = 'transform'; // Add will-change for GPU acceleration
+        this.powerMeter.style.overflow = 'visible'; // Changed to visible to show the indicator
+        this.powerMeter.style.zIndex = '1000';
+        this.powerMeter.style.willChange = 'transform';
         
-        // Create a completely different style of indicator - visible arrow on the right side
+        // Create ideal power indicator with more visible styling
         this.idealPowerIndicator = document.createElement('div');
         this.idealPowerIndicator.className = 'ideal-power-indicator';
         
-        // Make it a right-pointing triangle
+        // Make it a right-pointing triangle with larger size
         this.idealPowerIndicator.style.width = '0';
         this.idealPowerIndicator.style.height = '0';
-        this.idealPowerIndicator.style.borderTop = '10px solid transparent';
-        this.idealPowerIndicator.style.borderBottom = '10px solid transparent';
-        this.idealPowerIndicator.style.borderLeft = '15px solid red'; // Red triangle pointing right
+        this.idealPowerIndicator.style.borderTop = '12px solid transparent';
+        this.idealPowerIndicator.style.borderBottom = '12px solid transparent';
+        this.idealPowerIndicator.style.borderLeft = '20px solid #ff0000'; // Brighter red
         
         this.idealPowerIndicator.style.position = 'absolute';
-        this.idealPowerIndicator.style.right = '-18px'; // Position it outside the meter
-        this.idealPowerIndicator.style.bottom = '50%'; // Start at middle for testing
-        this.idealPowerIndicator.style.marginBottom = '-5px'; // Center it vertically
-        this.idealPowerIndicator.style.zIndex = '1001'; // Higher than the meter
+        this.idealPowerIndicator.style.right = '-22px';
+        this.idealPowerIndicator.style.bottom = '50%';
+        this.idealPowerIndicator.style.marginBottom = '-12px';
+        this.idealPowerIndicator.style.zIndex = '1001';
+        this.idealPowerIndicator.style.filter = 'drop-shadow(0 0 2px rgba(0,0,0,0.5))'; // Add shadow for visibility
         this.powerMeter.appendChild(this.idealPowerIndicator);
 
-        
+        // Create label for the indicator
+        this.indicatorLabel = document.createElement('div');
+        this.indicatorLabel.style.position = 'absolute';
+        this.indicatorLabel.style.right = '-70px';
+        this.indicatorLabel.style.width = '50px';
+        this.indicatorLabel.style.textAlign = 'left';
+        this.indicatorLabel.style.fontWeight = 'bold';
+        this.indicatorLabel.style.fontSize = '14px';
+        this.indicatorLabel.style.color = '#ffffff';
+        this.indicatorLabel.style.textShadow = '1px 1px 2px #000';
+        this.indicatorLabel.style.zIndex = '1001';
+        this.indicatorLabel.textContent = 'IDEAL';
+        this.powerMeter.appendChild(this.indicatorLabel);
+
         // Setup accuracy bar
         this.accuracyBar.style.width = '200px';
         this.accuracyBar.style.height = '30px';
@@ -273,14 +311,14 @@ class UIManager {
         this.selectedClub = club;
         const buttons = this.clubSelector.getElementsByTagName('button');
         for (let button of buttons) {
-            // Get the club name from the button's data attribute
             const buttonClub = button.getAttribute('data-club');
             button.style.backgroundColor = buttonClub === club ? '#4CAF50' : '';
         }
         // Update accuracy zones when club changes
         this.createAccuracyZones();
         
-        // Update ideal power indicator for new club
+        // Update ideal power indicator when club changes
+        this.idealPowerNeedsUpdate = true;
         this.updateIdealPowerIndicator();
         
         // Set the club changed flag to true
@@ -320,57 +358,54 @@ class UIManager {
     // Set physics engine reference
     setPhysicsEngine(physicsEngine) {
         this.physicsEngine = physicsEngine;
+        // Update ideal power indicator when physics engine is set
+        this.updateIdealPowerIndicator();
     }
     updatePowerMeter(power) {
+        // Store the power for shot feedback
+        this.lastPower = power;
+        
         let bar = this.powerMeter.querySelector('.power-bar');
         if (!bar) {
             bar = document.createElement('div');
             bar.className = 'power-bar power-bar-fill';
             bar.style.width = '100%';
-            bar.style.height = '100%'; // fixed height; we scale instead
+            bar.style.height = '100%';
             bar.style.backgroundColor = 'lime';
             bar.style.position = 'absolute';
             bar.style.left = '0';
             bar.style.bottom = '0';
-            bar.style.transformOrigin = 'bottom'; // key for vertical scale
+            bar.style.transformOrigin = 'bottom';
             bar.style.transform = 'scaleY(0)';
-            bar.style.transition = 'transform 0.1s ease-out';
-            bar.style.willChange = 'transform'; // Add will-change for GPU acceleration
+            // Remove transition for smoother updates
+            bar.style.willChange = 'transform';
             this.powerMeter.appendChild(bar);
         }
     
-        // Set color based on power (same as before)
+        // Set color based on power
         bar.style.backgroundColor = `hsl(${power * 120}, 100%, 50%)`;
     
-        // Use transform instead of height, with hardware acceleration
+        // Use transform for better performance, without transition
         bar.style.transform = `translate3d(0, 0, 0) scaleY(${power})`;
     }
     
-    
     updateIdealPowerIndicator() {
-        // Only update if we have a physics engine reference
-        if (!this.physicsEngine) {
-      
-            return;
-        }
-        
-        if (!this.idealPowerIndicator) {
-        
+        // Only update if needed and we have required components
+        if (!this.idealPowerNeedsUpdate || !this.physicsEngine || !this.idealPowerIndicator) {
             return;
         }
         
         const club = this.selectedClub;
         try {
             // Get ideal power to hole with current club
-            // This idealPower is ALREADY a 0.0 to 1.0 value representing the required power percentage.
             let idealPower = this.physicsEngine.getIdealPowerToHole(club);
             
-            // Ensure idealPower is a valid number and clamp it (it should already be clamped by physicsEngine)
+            // Ensure idealPower is a valid number and clamp it
             if (isNaN(idealPower)) {
                 console.error("Invalid ideal power calculated (NaN):", idealPower);
-                idealPower = 0; // Default to 0 if NaN
+                idealPower = 0;
             }
-            idealPower = Math.min(1, Math.max(0, idealPower)); // Re-clamp just in case
+            idealPower = Math.min(1, Math.max(0, idealPower));
             
             // Check if we're on the green
             const isOnGreen = this.physicsEngine.terrain && 
@@ -380,15 +415,8 @@ class UIManager {
                 ) === 'green';
             const isPutter = club === 'putter';
             
-            // The idealPower is now the correctly scaled 0-1 value for the UI.
-            // No further normalization against an old maxPower is needed.
-            const normalizedPowerForUI = idealPower; 
-            
-            // Check if we're using full power (meaning the hole is potentially out of range)
-            const isMaxPower = normalizedPowerForUI >= 0.99;
-            
             // Position the indicator
-            const bottomPosition = `${normalizedPowerForUI * 100}%`;
+            const bottomPosition = `${idealPower * 100}%`;
             this.idealPowerIndicator.style.bottom = bottomPosition;
             
             // Update triangle color based on whether hole is in range and if putting
@@ -396,35 +424,22 @@ class UIManager {
             if (isOnGreen && isPutter) {
                 color = '#00ffff'; // Cyan for putting
             } else {
-                color = isMaxPower ? '#ff6666' : '#00ff00'; // Red or bright green for other shots
+                color = idealPower >= 0.99 ? '#ff6666' : '#00ff00'; // Red or bright green
             }
             this.idealPowerIndicator.style.borderLeftColor = color;
-            
-            // Add a label to make it super obvious
-            if (!this.indicatorLabel) {
-                this.indicatorLabel = document.createElement('div');
-                this.indicatorLabel.style.position = 'absolute';
-                this.indicatorLabel.style.right = '-60px';
-                this.indicatorLabel.style.width = '40px';
-                this.indicatorLabel.style.textAlign = 'left';
-                this.indicatorLabel.style.fontWeight = 'bold';
-                this.indicatorLabel.style.fontSize = '12px';
-                this.indicatorLabel.style.color = '#ffffff';
-                this.indicatorLabel.style.textShadow = '1px 1px 2px #000';
-                this.indicatorLabel.style.zIndex = '1001';
-                this.powerMeter.appendChild(this.indicatorLabel);
-            }
             
             // Update label text and position
             if (isOnGreen && isPutter) {
                 this.indicatorLabel.textContent = 'PUTT';
             } else {
-                this.indicatorLabel.textContent = isMaxPower ? 'MAX' : 'IDEAL';
+                this.indicatorLabel.textContent = idealPower >= 0.99 ? 'MAX' : 'IDEAL';
             }
             this.indicatorLabel.style.bottom = bottomPosition;
-            this.indicatorLabel.style.marginBottom = '-6px'; // Center it vertically
+            this.indicatorLabel.style.marginBottom = '-7px';
             
-            console.log(`Indicator updated to UI position: ${bottomPosition} (${(normalizedPowerForUI * 100).toFixed(0)}%), color: ${color}`);
+            // Mark as updated
+            this.idealPowerNeedsUpdate = false;
+            
         } catch (error) {
             console.error("Error updating ideal power indicator:", error);
         }
@@ -640,7 +655,7 @@ class UIManager {
             html += `<tr style="border-bottom: 1px solid #444; ${rowStyle}">
                 <td style="padding: 5px;">${holeNumber}</td>
                 <td style="padding: 5px;">${par}</td>
-                <td style="padding: 5px;">${score}</td>
+               <td style="padding: 5px;">${score}</td>
                 <td style="padding: 5px;">${relativeScoreText}</td>
             </tr>`;
         });
@@ -662,6 +677,58 @@ class UIManager {
         
         this.scorecardModal.innerHTML = html;
         this.scorecardModal.style.display = 'block'; // Ensure modal is visible
+    }
+
+    showShotFeedback(accuracy, distance) {
+        // Get the ideal power for the current club and distance
+        const idealPower = this.physicsEngine.getIdealPowerToHole(this.selectedClub);
+        const actualPower = this.lastPower || 0; // Store power when taking shot
+        
+        // Calculate power rating (how close to ideal power)
+        const powerDiff = Math.abs(actualPower - idealPower);
+        let powerRating;
+        if (powerDiff <= 0.1) {
+            powerRating = 'perfect';
+        } else if (powerDiff <= 0.2) {
+            powerRating = 'okay';
+        } else {
+            powerRating = 'bad';
+        }
+        
+        // Combine accuracy and power ratings
+        let finalRating;
+        if (accuracy === 'perfect' && powerRating === 'perfect') {
+            finalRating = 'Perfect Shot!';
+        } else if ((accuracy === 'perfect' && powerRating === 'okay') || 
+                  (accuracy === 'okay' && powerRating === 'perfect')) {
+            finalRating = 'Great Shot!';
+        } else if (accuracy === 'okay' && powerRating === 'okay') {
+            finalRating = 'Good Shot';
+        } else if (accuracy === 'bad' || powerRating === 'bad') {
+            finalRating = 'Missed';
+        } else {
+            finalRating = 'Shot Complete';
+        }
+
+        // Update panel content
+        this.shotFeedbackPanel.innerHTML = `
+            <div style="font-size: 24px; margin-bottom: 10px;">${finalRating}</div>
+            <div style="font-size: 18px;">Distance: ${Math.round(distance)} yards</div>
+        `;
+
+        // Show panel
+        this.shotFeedbackPanel.style.opacity = '1';
+
+        // Hide panel after 2 seconds
+        setTimeout(() => {
+            this.shotFeedbackPanel.style.opacity = '0';
+        }, 2000);
+    }
+
+    // Add method to force update of ideal power indicator
+    forceUpdateIdealPower() {
+        this.idealPowerNeedsUpdate = true;
+        this.updateIdealPowerIndicator();
     }
 }
 
