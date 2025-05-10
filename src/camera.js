@@ -259,33 +259,37 @@ class CameraController {
         const cameraDistance = 6;  // Distance behind the ball
         const cameraHeight = 4;    // Height above the ball
         
-        // Calculate camera position based on aim angle
-        const dirX = Math.cos(aimAngle);
-        const dirZ = -Math.sin(aimAngle);
-        
-        // Position camera behind the ball based on aim angle
-        this.targetPosition.set(
-            ballPosition.x - dirX * cameraDistance,
-            ballPosition.y + cameraHeight,
-            ballPosition.z - dirZ * cameraDistance
-        );
-        
-        // Look towards the pin (hole) instead of the aim direction
+        // Get hole position if available
+        let holePosition;
         if (window.physicsEngine && window.physicsEngine.hole) {
-            const holePosition = window.physicsEngine.hole.position;
-            this.targetLookAt.set(
-                holePosition.x,
-                holePosition.y + 0.5, // Look slightly above the hole
-                holePosition.z
-            );
+            holePosition = window.physicsEngine.hole.position;
         } else {
-            // Fallback to looking in aim direction if hole position not available
-            this.targetLookAt.set(
+            // Fallback to aim direction if hole position not available
+            const dirX = Math.cos(aimAngle);
+            const dirZ = -Math.sin(aimAngle);
+            holePosition = new THREE.Vector3(
                 ballPosition.x + dirX * 50,
                 ballPosition.y - 1,
                 ballPosition.z + dirZ * 50
             );
         }
+        
+        // Calculate direction from ball to hole
+        const ballToHole = new THREE.Vector3().subVectors(holePosition, ballPosition).normalize();
+        
+        // Position camera behind the ball, opposite to the direction to the hole
+        this.targetPosition.set(
+            ballPosition.x - ballToHole.x * cameraDistance,
+            ballPosition.y + cameraHeight,
+            ballPosition.z - ballToHole.z * cameraDistance
+        );
+        
+        // Look at the hole
+        this.targetLookAt.set(
+            holePosition.x,
+            holePosition.y + 0.5, // Look slightly above the hole
+            holePosition.z
+        );
     }
 
     handleLandingCamera(ballPosition) {
